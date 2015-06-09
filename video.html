@@ -2,10 +2,10 @@
 
 <head>
     <!-- Respoke client library -->
-    <script src="https://cdn.respoke.io/respoke.min.js"></script>
+    <script src="https://4efe849.ngrok.com/javascript/transporter/respoke.min.js"></script>
 
     <!-- jQuery, for this example -->
-    <script src="http://code.jquery.com/jquery-1.11.0.min.js"></script>
+    <script src="https://code.jquery.com/jquery-1.11.0.min.js"></script>
     
     <!-- Some simple styles to make things perty -->
     <link rel="stylesheet" type="text/css" href="style.css">
@@ -21,21 +21,27 @@
     <div>
         <input id="remoteId" placeholder="User to Call" type="text" />
         <button id="doCall">Call</button>
+        <button id="doScreenShare">Add Screen Share</button>
         <button id="doHangUp">Hang Up</button>
     </div>
 
     <!-- The person you're calling -->
-    <div id="remoteVideoSource"></div>
+    <video id="remoteVideoSource"></video>
 
     <!-- You -->
-    <div id="localVideoSource"></div>
+    <video id="localVideoSource"></video>
+
+    <!-- Screen Share -->
+    <video id="screenVideoSource"></video>
 
     <script type="text/javascript">
+        respoke.log.setLevel('debug');
         // App ID value from the dev portal. You can play
         // around with the supplied ID or replace it with
         // your own.
         var appid = "b4931d40-ff2b-4c46-8487-bf955a75501d";
         var activeCall;
+        var screenCall;
 
         // The ID that other users will identify you by (your username)
         var endpointId;
@@ -60,33 +66,46 @@
             });
         });
 
-        // The options for our video call including constraints and callbacks
-        var callOptions = {
-            constraints: {audio: true, video: true},
-
-            // Your video
-            onLocalMedia: function(evt) {
-                setVideo('localVideoSource', evt.element)
-            },
-
-            // Their video
-            onConnect: function(evt) {
-                setVideo('remoteVideoSource', evt.element)
-            }
-        };
-        
         // Listen for incoming calls
         client.listen('call', function(evt) {
-            activeCall = evt.call;
+            $("#remoteId").val(evt.call.remoteEndpoint.id);
+            var answerOptions = {
+                constraints: [{video: true, audio: true}],
+                onLocalMedia: function (evt) {
+                    setVideo('localVideoSource', evt.stream.stream);
+                }
+            };
+
+            if (evt.call.incomingMediaStreams[0].hasScreenShare()) {
+                console.log("screenshare? YAS.");
+                screenCall = evt.call;
+                activeCall.ignore('hangup', hangUp);
+                screenCall.listen('hangup', hangUp);
+                answerOptions.onConnect = function (evt) {
+                    activeCall.hangup();
+                    //$('remoteVideoSource').hide();
+
+                    screenCall.incomingMediaStreams.forEach(function (stream) {
+                        if (stream.hasAudio()) { // it's our screenshare
+                            // attach it to screenVideoSource
+                            setVideo("screenVideoSource", stream.stream);
+                        } else {
+                            // attach it to remoteVideoSource
+                            setVideo("remoteVideoSource", stream.stream);
+                        }
+                    });
+                };
+            } else {
+                activeCall = evt.call;
+                activeCall.listen('hangup', hangUp);
+                answerOptions.onConnect = function (evt) {
+                    setVideo('remoteVideoSource', evt.stream);
+                };
+            }
 
             // We only want to answer if we didn't initiate the call
-            if(activeCall.caller !== true) {
-                activeCall.answer(callOptions);
-
-                // The hangup event indicates the call is over
-                activeCall.listen('hangup', function () {
-                    hangUp();
-                });
+            if (evt.call.caller !== true) {
+                evt.call.answer(answerOptions);
             }
         });
 
@@ -94,27 +113,69 @@
         $("#doCall").click(function() {
             var recipientId = $("#remoteId").val();
             var recipientEndpoint = client.getEndpoint({ id: recipientId });
-            activeCall = recipientEndpoint.startVideoCall(callOptions);
+            activeCall = recipientEndpoint.startVideoCall({
+                onLocalMedia: function (evt) {
+                    setVideo("localVideoSource", evt.stream.stream);
+                },
+                onConnect: function (evt) {
+                    setVideo("remoteVideoSource", evt.stream);
+                }
+            });
+        });
+
+        // Call the recipient
+        $("#doScreenShare").click(function() {
+            var recipientId = $("#remoteId").val();
+            var recipientEndpoint = client.getEndpoint({ id: recipientId });
+            screenCall = recipientEndpoint.startScreenShare({
+                sendOnly: false,
+                constraints: [{video: true, audio: true}],
+                onLocalMedia:function (evt) {
+                    console.log("not reattaching local video from screenshare.");
+                    screenCall.outgoingMediaStreams.forEach(function (stream) {
+                        if (stream.hasAudio()) { // it's our screenshare
+                            // attach it to screenVideoSource
+                            setVideo("screenVideoSource", stream.stream);
+                        } else {
+                            // attach it to remoteVideoSource
+                            setVideo("localVideoSource", stream.stream);
+                        }
+                    });
+                },
+                onConnect: function (evt) {
+                    //$('localVideoSource').hide();
+                    setVideo("remoteVideoSource", evt.stream);
+                }
+            });
         });
 
         // Hangup the call
-        $("#doHangUp").click(hangUp);
+        $("#doHangUp").click(function () {
+            if (activeCall && activeCall.isActive()) {
+                activeCall.hangup();
+            }
+
+            if (screenCall && screenCall.isActive()) {
+                screenCall.hangup();
+            }
+        });
 
         // Adds the supplied video element as a child of the supplied element
-        function setVideo(elementId, videoElement) {
-            var videoParent = document.getElementById(elementId);
-            videoParent.innerHTML = "";
-            videoParent.appendChild(videoElement);
+        function setVideo(videoId, mediaStream) {
+            var element = document.getElementById(videoId);
+            attachMediaStream(element, mediaStream);
+            element.play();
         }
 
         // End the current call and clean up the DOM
         function hangUp() {
-            activeCall.hangup();
             activeCall = null;
+            screenCall = null;
 
             // Remove the video elements
             $("#localVideoSource").html("");
             $("#remoteVideoSource").html("");
+            $("#screenVideoSource").html("");
         }
     </script>
 </body>
