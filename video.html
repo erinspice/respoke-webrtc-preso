@@ -38,6 +38,7 @@
 
     <script type="text/javascript">
         respoke.log.setLevel('debug');
+        respoke.ridiculous = true;
         // App ID value from the dev portal. You can play
         // around with the supplied ID or replace it with
         // your own.
@@ -108,13 +109,13 @@
         });
 
         $("#answerCall").click(function() {
-            if (activeCall.caller !== true) {
+            if (activeCall && activeCall.caller !== true) {
                 activeCall.answer(answerOptions);
             }
         });
 
         $("#rejectCall").click(function() {
-            if (activeCall.caller !== true) {
+            if (activeCall && activeCall.caller !== true) {
                 activeCall.reject();
             }
         });
